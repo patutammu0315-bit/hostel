@@ -36,31 +36,53 @@ import {
 import { checkRateLimit } from '@/lib/ratelimit';
 import { MetaWebhookPayload } from '@/types';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 /**
  * GET /api/webhook
  * Used by Meta WhatsApp Cloud API to verify webhook subscription.
  */
 export async function GET(request: NextRequest) {
-  const searchParams = request.nextUrl.searchParams;
-  const mode = searchParams.get('hub.mode');
-  const token = searchParams.get('hub.verify_token');
+  // Support both nextUrl and standard URL searchParams on Vercel serverless
+  const searchParams =
+    request.nextUrl?.searchParams || new URL(request.url).searchParams;
+
+  const mode = searchParams.get('hub.mode')?.trim();
+  const token = searchParams.get('hub.verify_token')?.trim();
   const challenge = searchParams.get('hub.challenge');
 
-  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
+  // Read environment variable; fallback to default IFET_WHATSAPP_VERIFY_2026
+  const configuredVerifyToken = (
+    process.env.WHATSAPP_VERIFY_TOKEN || 'IFET_WHATSAPP_VERIFY_2026'
+  ).trim();
 
-  // Safe technical log without exposing token
-  console.log(`[Webhook Verification] Mode: ${mode}, Token provided: ${Boolean(token)}`);
+  console.log(
+    `[Webhook Verification] hub.mode: "${mode}", token present: ${Boolean(token)}`
+  );
 
-  if (mode === 'subscribe' && token && verifyToken && token === verifyToken) {
+  // Validate handshake
+  if (mode === 'subscribe' && token === configuredVerifyToken && challenge) {
     console.log('[Webhook Verification] Successful subscription handshake.');
-    return new NextResponse(challenge || '', {
+    return new NextResponse(challenge, {
       status: 200,
-      headers: { 'Content-Type': 'text/plain' },
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      },
     });
   }
 
-  console.warn('[Webhook Verification Failed] Token mismatch or invalid mode.');
-  return new NextResponse('Verification failed: Forbidden', { status: 403 });
+  console.warn(
+    `[Webhook Verification Failed] Mode or token mismatch. Mode: "${mode}", Token matches: ${token === configuredVerifyToken}`
+  );
+  return new NextResponse('Verification failed: Forbidden', {
+    status: 403,
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+    },
+  });
 }
 
 /**
