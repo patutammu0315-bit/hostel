@@ -126,7 +126,7 @@ describe('Telegram Integration Tests', () => {
 
     it('matches invalid format reply specification', () => {
       expect(TELEGRAM_INVALID_FORMAT_REPLY).toBe(
-        '❌ Invalid format.\n\nPlease send data like:\n\n120,8,3'
+        '❌ Invalid format.\n\nPlease send data like:\n120,8,3'
       );
     });
   });

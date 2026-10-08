@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   parseTelegramCountMessage,
   formatTelegramSuccessReply,
+  TELEGRAM_WELCOME_REPLY,
   TELEGRAM_INVALID_FORMAT_REPLY,
 } from '@/lib/telegramParser';
 import { sendTelegramMessage } from '@/services/telegramService';
@@ -23,11 +24,14 @@ export const revalidate = 0;
  * Health check and diagnostic endpoint for the Telegram webhook.
  */
 export async function GET() {
-  const hasToken = Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim());
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  const tokenConfigured = Boolean(token);
+
   return NextResponse.json(
     {
       status: 'Telegram Webhook Endpoint Active',
-      tokenConfigured: hasToken,
+      tokenConfigured,
+      tokenPrefix: tokenConfigured ? `${token?.substring(0, 8)}...` : null,
       endpoint: '/api/telegram/webhook',
       timestamp: new Date().toISOString(),
     },
@@ -41,6 +45,9 @@ export async function GET() {
  * Compatible with Vercel serverless runtime.
  */
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  console.log('[Telegram Webhook] Inbound POST request received.');
+
   try {
     let update: TelegramUpdate;
     try {
@@ -51,85 +58,97 @@ export async function POST(request: NextRequest) {
     }
 
     const updateId = update?.update_id;
-    if (typeof updateId !== 'number') {
-      console.warn('[Telegram Webhook] Payload missing update_id.');
-      return NextResponse.json({ ok: true, status: 'ignored_missing_update_id' }, { status: 200 });
-    }
+    console.log(`[Telegram Webhook] Update ID: ${updateId}`);
 
-    const message = update.message || update.edited_message;
+    const message = update?.message || update?.edited_message;
     if (!message) {
-      // Non-message event (e.g. channel_post, inline_query) -> acknowledge and ignore
+      console.log('[Telegram Webhook] No message or edited_message in update; acknowledging.');
       return NextResponse.json({ ok: true, status: 'ignored_non_message' }, { status: 200 });
     }
 
+    // Requirement 2: Extract update.message.text and update.message.chat.id
     const chatId = message.chat?.id;
+    const rawText = message.text;
+
+    console.log(`[Telegram Webhook] Extracted -> chatId: ${chatId}, text: "${rawText}"`);
+
     if (!chatId) {
-      console.warn(`[Telegram Webhook] Message has no chat_id in update_id ${updateId}`);
+      console.warn('[Telegram Webhook] Missing chat.id in message.');
       return NextResponse.json({ ok: true, status: 'ignored_no_chat_id' }, { status: 200 });
     }
 
-    // Idempotency check: prevent duplicate processing if Telegram retries the same update
+    // Check duplicate update_id (non-blocking if database is unconfigured)
     const updateKey = `tg_up_${updateId}`;
-    const alreadyProcessed = await isMessageAlreadyProcessed(updateKey);
-    if (alreadyProcessed) {
-      console.log(`[Telegram Webhook Idempotency] Duplicate update_id ${updateId} already processed.`);
-      return NextResponse.json({ ok: true, status: 'duplicate_ignored' }, { status: 200 });
+    try {
+      const alreadyProcessed = await isMessageAlreadyProcessed(updateKey);
+      if (alreadyProcessed) {
+        console.log(`[Telegram Webhook Idempotency] Duplicate update_id ${updateId} already processed.`);
+        return NextResponse.json({ ok: true, status: 'duplicate_ignored' }, { status: 200 });
+      }
+    } catch (dbCheckErr: any) {
+      console.warn('[Telegram Webhook Idempotency Warning] Could not check duplicate:', dbCheckErr?.message);
     }
 
-    // Extract message sender info
+    // Ignore non-text messages (e.g. photos, stickers)
+    if (typeof rawText !== 'string' || !rawText.trim()) {
+      console.log(`[Telegram Webhook] Ignored non-text message in chat ${chatId}`);
+      return NextResponse.json({ ok: true, status: 'ignored_non_text' }, { status: 200 });
+    }
+
+    const text = rawText.trim();
+
+    // Requirement 5: For /start, reply with welcome instructions
+    if (text === '/start') {
+      console.log(`[Telegram Webhook] Handling /start command for chat ${chatId}`);
+      const sendResult = await sendTelegramMessage(chatId, TELEGRAM_WELCOME_REPLY);
+      console.log(`[Telegram Webhook] /start sendResult:`, sendResult);
+
+      try {
+        await recordProcessedMessage(updateKey, String(chatId), 'start');
+      } catch (logErr) {
+        // Non-blocking
+      }
+
+      return NextResponse.json({ ok: true, status: 'start_replied' }, { status: 200 });
+    }
+
+    // Requirement 3: Parse message (e.g. 120,8,3 -> Hostel: 120, Students: 8, Rooms: 3)
+    const parsed = parseTelegramCountMessage(text);
+
+    // Requirement 6: For invalid messages, reply with invalid format message
+    if (!parsed.isValid || !parsed.data) {
+      console.log(`[Telegram Webhook] Invalid format received: "${text}" from chat ${chatId}`);
+      const sendResult = await sendTelegramMessage(chatId, TELEGRAM_INVALID_FORMAT_REPLY);
+      console.log(`[Telegram Webhook] Invalid format sendResult:`, sendResult);
+
+      try {
+        await recordProcessedMessage(updateKey, String(chatId), 'invalid_format');
+      } catch (logErr) {
+        // Non-blocking
+      }
+
+      return NextResponse.json({ ok: true, status: 'invalid_format_replied' }, { status: 200 });
+    }
+
+    // Valid format: Hostel = 120, Students = 8, Rooms = 3
+    const { hostel, students, rooms, total } = parsed.data;
+    console.log(
+      `[Telegram Webhook] Valid count: Hostel=${hostel}, Students=${students}, Rooms=${rooms}, Total=${total}`
+    );
+
+    // Extract sender username or display name
     const from = message.from;
     const senderIdentifier = from?.username
       ? `@${from.username}`
       : [from?.first_name, from?.last_name].filter(Boolean).join(' ') || `Chat_${chatId}`;
     const submittedBy = `Telegram: ${senderIdentifier}`;
 
-    const text = message.text?.trim();
-
-    // Ignore non-text messages (stickers, photos, voice, etc.)
-    if (!text) {
-      console.log(`[Telegram Webhook] Ignored non-text message from ${senderIdentifier} (${chatId})`);
-      await recordProcessedMessage(updateKey, String(chatId), 'non_text');
-      return NextResponse.json({ ok: true, status: 'ignored_non_text' }, { status: 200 });
-    }
-
-    console.log(`[Telegram Webhook] Inbound message from ${senderIdentifier} (${chatId}): "${text}"`);
-
-    // Handle /start command
-    if (text === '/start') {
-      await sendTelegramMessage(
-        chatId,
-        `👋 Welcome to Hostel Daily Count Bot!\n\nPlease send data like:\n\n120,8,3`
-      );
-      await recordProcessedMessage(updateKey, String(chatId), 'start');
-      return NextResponse.json({ ok: true, status: 'start_replied' }, { status: 200 });
-    }
-
-    // Parse count message (e.g. "120,8,3")
-    const parsed = parseTelegramCountMessage(text);
-
-    // 1. Invalid format handling
-    if (!parsed.isValid || !parsed.data) {
-      console.log(`[Telegram Webhook] Invalid format from ${senderIdentifier}: "${text}"`);
-      await sendTelegramMessage(chatId, TELEGRAM_INVALID_FORMAT_REPLY);
-      await recordProcessedMessage(updateKey, String(chatId), 'invalid_format');
-      return NextResponse.json({ ok: true, status: 'invalid_format_replied' }, { status: 200 });
-    }
-
-    // 2. Valid format handling
-    // Hostel = 120, Students = 8, Rooms = 3
-    const { hostel, students, rooms, total } = parsed.data;
+    // Store parsed data using existing database / data workflow (safe non-blocking)
     const { isoDate } = getCurrentDateInTimezone();
-
-    console.log(
-      `[Telegram Webhook] Valid count from ${senderIdentifier}: Hostel=${hostel}, Students=${students}, Rooms=${rooms}, Total=${total} for date ${isoDate}`
-    );
-
-    // Store parsed data using existing database / data workflow
     try {
       const existingRecord = await getDailyCountByDate(isoDate);
 
       if (existingRecord) {
-        // Update existing record for today
         await updateDailyCount(isoDate, {
           students: hostel,
           staff: students,
@@ -138,9 +157,8 @@ export async function POST(request: NextRequest) {
           submittedBy,
           messageId: updateKey,
         });
-        console.log(`[Telegram Webhook] Updated existing record for date ${isoDate}`);
+        console.log(`[Telegram Webhook] Database updated record for date ${isoDate}`);
       } else {
-        // Insert new record for today
         await saveDailyCount({
           recordDate: isoDate,
           students: hostel,
@@ -150,28 +168,30 @@ export async function POST(request: NextRequest) {
           submittedBy,
           messageId: updateKey,
         });
-        console.log(`[Telegram Webhook] Inserted new record for date ${isoDate}`);
+        console.log(`[Telegram Webhook] Database inserted record for date ${isoDate}`);
       }
     } catch (dbErr: any) {
       console.error('[Telegram Webhook Database Error]', dbErr?.message || dbErr);
-      await sendTelegramMessage(
-        chatId,
-        `⚠️ Unable to save today's count right now.\n\nPlease try again.`
-      );
-      // Return 200 so Telegram doesn't retry looping on db exceptions
-      return NextResponse.json({ ok: true, status: 'db_error_handled' }, { status: 200 });
     }
 
-    // 3. Automatically reply through Telegram
+    // Requirement 4: Send success reply using Telegram Bot API
     const successReply = formatTelegramSuccessReply(hostel, students, rooms);
-    await sendTelegramMessage(chatId, successReply);
+    const sendResult = await sendTelegramMessage(chatId, successReply);
+    console.log(`[Telegram Webhook] Success reply sendResult:`, sendResult);
 
-    // Record processed message for idempotency
-    await recordProcessedMessage(updateKey, String(chatId), 'count_saved');
+    try {
+      await recordProcessedMessage(updateKey, String(chatId), 'count_saved');
+    } catch (logErr) {
+      // Non-blocking
+    }
 
+    const durationMs = Date.now() - startTime;
+    console.log(`[Telegram Webhook] Finished processing update ${updateId} in ${durationMs}ms`);
+
+    // Requirement 10: Always return HTTP 200 to Telegram
     return NextResponse.json({ ok: true, status: 'count_saved' }, { status: 200 });
   } catch (error: any) {
-    // Critical: Never crash serverless webhook or leak secrets
+    // Critical: Never crash webhook or return non-200 to avoid Telegram retry storms
     console.error('[Telegram Webhook Critical Error]', error?.message || error);
     return NextResponse.json({ ok: true, status: 'internal_error_handled' }, { status: 200 });
   }

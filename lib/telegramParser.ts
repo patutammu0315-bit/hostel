@@ -11,10 +11,15 @@ export interface TelegramParseResult {
   rawText: string;
 }
 
+export const TELEGRAM_WELCOME_REPLY = `👋 Welcome to Hostel Management!
+
+Please send hostel data in this format:
+
+120,8,3`;
+
 export const TELEGRAM_INVALID_FORMAT_REPLY = `❌ Invalid format.
 
 Please send data like:
-
 120,8,3`;
 
 export function formatTelegramSuccessReply(
