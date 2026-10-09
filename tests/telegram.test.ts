@@ -121,7 +121,7 @@ describe('Telegram Integration Tests', () => {
 
     it('matches welcome reply specification', () => {
       expect(TELEGRAM_WELCOME_REPLY).toBe(
-        "Boys Hostel\n\nWelcome to Hostel Management.\n\nPlease send today's hostel count in this format:\n120,8,3\n\nFirst value = Total Students\nSecond value = Staff\nThird value = Others"
+        "Boys Hostel\n\nWelcome to Hostel Management.\n\nPlease send today's hostel count in this format:\n\n120,8,3\n\nWhere:\n120 = Total Students\n8 = Staff\n3 = Others"
       );
     });
 

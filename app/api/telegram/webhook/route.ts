@@ -31,7 +31,6 @@ export async function GET() {
     {
       status: 'Telegram Webhook Endpoint Active',
       tokenConfigured,
-      tokenPrefix: tokenConfigured ? `${token?.substring(0, 8)}...` : null,
       endpoint: '/api/telegram/webhook',
       timestamp: new Date().toISOString(),
     },
@@ -98,7 +97,7 @@ export async function POST(request: NextRequest) {
     const text = rawText.trim();
 
     // Requirement 5: For /start, reply with welcome instructions
-    if (text === '/start') {
+    if (text === '/start' || text.startsWith('/start ') || text.startsWith('/start@')) {
       console.log(`[Telegram Webhook] Handling /start command for chat ${chatId}`);
       const sendResult = await sendTelegramMessage(chatId, TELEGRAM_WELCOME_REPLY);
       console.log(`[Telegram Webhook] /start sendResult:`, sendResult);

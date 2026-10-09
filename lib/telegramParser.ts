@@ -16,11 +16,13 @@ export const TELEGRAM_WELCOME_REPLY = `Boys Hostel
 Welcome to Hostel Management.
 
 Please send today's hostel count in this format:
+
 120,8,3
 
-First value = Total Students
-Second value = Staff
-Third value = Others`;
+Where:
+120 = Total Students
+8 = Staff
+3 = Others`;
 
 export const TELEGRAM_INVALID_FORMAT_REPLY = `Invalid format.
 
