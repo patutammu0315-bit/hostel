@@ -1,7 +1,7 @@
 export interface TelegramParsedCount {
-  hostel: number;
-  students: number;
-  rooms: number;
+  students: number; // Total Students (first value)
+  staff: number; // Staff (second value)
+  others: number; // Others (third value)
   total: number;
 }
 
@@ -11,43 +11,60 @@ export interface TelegramParseResult {
   rawText: string;
 }
 
-export const TELEGRAM_WELCOME_REPLY = `👋 Welcome to Hostel Management!
+export const TELEGRAM_WELCOME_REPLY = `Boys Hostel
 
-Please send hostel data in this format:
+Welcome to Hostel Management.
 
-120,8,3`;
+Please send today's hostel count in this format:
+120,8,3
 
-export const TELEGRAM_INVALID_FORMAT_REPLY = `❌ Invalid format.
+First value = Total Students
+Second value = Staff
+Third value = Others`;
+
+export const TELEGRAM_INVALID_FORMAT_REPLY = `Invalid format.
 
 Please send data like:
 120,8,3`;
 
+/**
+ * Formats success reply:
+ *
+ * Boys Hostel
+ *
+ * Date: DD-MM-YYYY
+ *
+ * Total Students: [first value]
+ * Staff: [second value]
+ * Others: [third value]
+ */
 export function formatTelegramSuccessReply(
-  hostel: number,
+  formattedDate: string,
   students: number,
-  rooms: number
+  staff: number,
+  others: number
 ): string {
-  return `✅ Data received successfully!
+  return `Boys Hostel
 
-Hostel: ${hostel}
-Students: ${students}
-Rooms: ${rooms}`;
+Date: ${formattedDate}
+
+Total Students: ${students}
+Staff: ${staff}
+Others: ${others}`;
 }
 
 /**
- * Parses incoming Telegram message text into Hostel, Students, and Rooms.
- *
- * Supported count formats:
- * - "120,8,3"
- * - "120, 8, 3"
- * - "120 8 3"
+ * Parses incoming Telegram message text into:
+ * - First value = Total Students
+ * - Second value = Staff
+ * - Third value = Others
  *
  * Example:
  * 120,8,3 ->
- *   Hostel = 120
- *   Students = 8
- *   Rooms = 3
- *   total = 131
+ *   Total Students = 120
+ *   Staff = 8
+ *   Others = 3
+ *   Total = 131
  */
 export function parseTelegramCountMessage(
   rawInput: string | undefined | null
@@ -67,15 +84,17 @@ export function parseTelegramCountMessage(
     };
   }
 
-  // Determine split strategy: comma or whitespace
-  let tokens: string[] = [];
-  if (cleaned.includes(',')) {
-    tokens = cleaned.split(',').map((t) => t.trim());
-  } else {
-    tokens = cleaned.split(/\s+/).map((t) => t.trim());
+  // Must contain comma-separated values (allowing optional surrounding spaces)
+  if (!cleaned.includes(',')) {
+    return {
+      isValid: false,
+      rawText: cleaned,
+    };
   }
 
-  // Exactly 3 non-empty values are required: Hostel, Students, Rooms
+  const tokens = cleaned.split(',').map((t) => t.trim());
+
+  // Exactly 3 comma-separated numeric values are required
   if (tokens.length !== 3) {
     return {
       isValid: false,
@@ -83,7 +102,7 @@ export function parseTelegramCountMessage(
     };
   }
 
-  // Validate that each token is strictly an unsigned whole integer (digits only)
+  // Validate each token consists strictly of digits (whole non-negative integer)
   const digitRegex = /^\d+$/;
   for (const token of tokens) {
     if (!digitRegex.test(token)) {
@@ -94,18 +113,17 @@ export function parseTelegramCountMessage(
     }
   }
 
-  const hostel = parseInt(tokens[0], 10);
-  const students = parseInt(tokens[1], 10);
-  const rooms = parseInt(tokens[2], 10);
+  const students = parseInt(tokens[0], 10);
+  const staff = parseInt(tokens[1], 10);
+  const others = parseInt(tokens[2], 10);
 
-  // Validate numbers are non-negative integers
   if (
-    Number.isNaN(hostel) ||
     Number.isNaN(students) ||
-    Number.isNaN(rooms) ||
-    hostel < 0 ||
+    Number.isNaN(staff) ||
+    Number.isNaN(others) ||
     students < 0 ||
-    rooms < 0
+    staff < 0 ||
+    others < 0
   ) {
     return {
       isValid: false,
@@ -113,14 +131,14 @@ export function parseTelegramCountMessage(
     };
   }
 
-  const total = hostel + students + rooms;
+  const total = students + staff + others;
 
   return {
     isValid: true,
     data: {
-      hostel,
       students,
-      rooms,
+      staff,
+      others,
       total,
     },
     rawText: cleaned,

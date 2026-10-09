@@ -60,14 +60,26 @@ export async function sendTelegramMessage(
       body: JSON.stringify(payload),
     });
 
-    const responseData = await response.json().catch(() => null);
+    const responseText = await response.text();
+    let responseData: any = null;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch {
+      responseData = responseText;
+    }
+
+    // Requirement 7: Log Telegram API response status and body
+    console.log(`[Telegram API Response] status: ${response.status}`);
+    console.log(
+      `[Telegram API Response] body:`,
+      typeof responseData === 'object' ? JSON.stringify(responseData) : responseData
+    );
 
     if (!response.ok || !responseData?.ok) {
       const errorDescription =
         responseData?.description || `HTTP ${response.status} ${response.statusText}`;
       const errorCode = responseData?.error_code || response.status;
 
-      // Safe logging without leaking bot token
       console.error(
         `[Telegram API Error] Status: ${response.status}, Code: ${errorCode}, Description: ${errorDescription}`
       );

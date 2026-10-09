@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   parseTelegramCountMessage,
   formatTelegramSuccessReply,
+  TELEGRAM_WELCOME_REPLY,
   TELEGRAM_INVALID_FORMAT_REPLY,
 } from '../lib/telegramParser';
 import { GET, POST } from '../app/api/telegram/webhook/route';
@@ -28,7 +29,7 @@ vi.mock('@/services/telegramService', () => ({
 vi.mock('@/lib/date', () => ({
   getCurrentDateInTimezone: vi.fn().mockReturnValue({
     isoDate: '2026-10-08',
-    formattedDate: '08 Oct 2026',
+    formattedDate: '08-10-2026',
     year: 2026,
     month: 10,
     day: 8,
@@ -45,13 +46,13 @@ describe('Telegram Integration Tests', () => {
   });
 
   describe('1. Parsing Telegram Count Messages', () => {
-    it('parses "120,8,3" as Hostel: 120, Students: 8, Rooms: 3, Total: 131', () => {
+    it('parses "120,8,3" as Total Students: 120, Staff: 8, Others: 3, Total: 131', () => {
       const res = parseTelegramCountMessage('120,8,3');
       expect(res.isValid).toBe(true);
       expect(res.data).toEqual({
-        hostel: 120,
-        students: 8,
-        rooms: 3,
+        students: 120,
+        staff: 8,
+        others: 3,
         total: 131,
       });
     });
@@ -60,20 +61,9 @@ describe('Telegram Integration Tests', () => {
       const res = parseTelegramCountMessage('120, 8, 3');
       expect(res.isValid).toBe(true);
       expect(res.data).toEqual({
-        hostel: 120,
-        students: 8,
-        rooms: 3,
-        total: 131,
-      });
-    });
-
-    it('parses "120 8 3" with whitespace delimiters correctly', () => {
-      const res = parseTelegramCountMessage('120 8 3');
-      expect(res.isValid).toBe(true);
-      expect(res.data).toEqual({
-        hostel: 120,
-        students: 8,
-        rooms: 3,
+        students: 120,
+        staff: 8,
+        others: 3,
         total: 131,
       });
     });
@@ -82,9 +72,9 @@ describe('Telegram Integration Tests', () => {
       const res = parseTelegramCountMessage('0,0,0');
       expect(res.isValid).toBe(true);
       expect(res.data).toEqual({
-        hostel: 0,
         students: 0,
-        rooms: 0,
+        staff: 0,
+        others: 0,
         total: 0,
       });
     });
@@ -96,6 +86,11 @@ describe('Telegram Integration Tests', () => {
 
     it('rejects extra tokens (e.g. "120,8,3,4")', () => {
       const res = parseTelegramCountMessage('120,8,3,4');
+      expect(res.isValid).toBe(false);
+    });
+
+    it('rejects input without commas (e.g. "120 8 3")', () => {
+      const res = parseTelegramCountMessage('120 8 3');
       expect(res.isValid).toBe(false);
     });
 
@@ -117,16 +112,22 @@ describe('Telegram Integration Tests', () => {
   });
 
   describe('2. Response Formats', () => {
-    it('formats success reply exactly matching specification', () => {
-      const reply = formatTelegramSuccessReply(120, 8, 3);
+    it('formats success reply with automatic date matching specification', () => {
+      const reply = formatTelegramSuccessReply('08-10-2026', 120, 8, 3);
       expect(reply).toBe(
-        '✅ Data received successfully!\n\nHostel: 120\nStudents: 8\nRooms: 3'
+        'Boys Hostel\n\nDate: 08-10-2026\n\nTotal Students: 120\nStaff: 8\nOthers: 3'
+      );
+    });
+
+    it('matches welcome reply specification', () => {
+      expect(TELEGRAM_WELCOME_REPLY).toBe(
+        "Boys Hostel\n\nWelcome to Hostel Management.\n\nPlease send today's hostel count in this format:\n120,8,3\n\nFirst value = Total Students\nSecond value = Staff\nThird value = Others"
       );
     });
 
     it('matches invalid format reply specification', () => {
       expect(TELEGRAM_INVALID_FORMAT_REPLY).toBe(
-        '❌ Invalid format.\n\nPlease send data like:\n120,8,3'
+        'Invalid format.\n\nPlease send data like:\n120,8,3'
       );
     });
   });
@@ -165,7 +166,7 @@ describe('Telegram Integration Tests', () => {
       expect(json.status).toBe('start_replied');
       expect(telegramService.sendTelegramMessage).toHaveBeenCalledWith(
         12345,
-        expect.stringContaining('120,8,3')
+        TELEGRAM_WELCOME_REPLY
       );
     });
 
@@ -206,7 +207,7 @@ describe('Telegram Integration Tests', () => {
 
       expect(telegramService.sendTelegramMessage).toHaveBeenCalledWith(
         98765,
-        '✅ Data received successfully!\n\nHostel: 120\nStudents: 8\nRooms: 3'
+        'Boys Hostel\n\nDate: 08-10-2026\n\nTotal Students: 120\nStaff: 8\nOthers: 3'
       );
     });
 
@@ -255,7 +256,7 @@ describe('Telegram Integration Tests', () => {
 
       expect(telegramService.sendTelegramMessage).toHaveBeenCalledWith(
         98765,
-        '✅ Data received successfully!\n\nHostel: 120\nStudents: 8\nRooms: 3'
+        'Boys Hostel\n\nDate: 08-10-2026\n\nTotal Students: 120\nStaff: 8\nOthers: 3'
       );
     });
 

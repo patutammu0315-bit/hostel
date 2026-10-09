@@ -130,10 +130,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, status: 'invalid_format_replied' }, { status: 200 });
     }
 
-    // Valid format: Hostel = 120, Students = 8, Rooms = 3
-    const { hostel, students, rooms, total } = parsed.data;
+    // Valid format: First = Total Students, Second = Staff, Third = Others
+    const { students, staff, others, total } = parsed.data;
     console.log(
-      `[Telegram Webhook] Valid count: Hostel=${hostel}, Students=${students}, Rooms=${rooms}, Total=${total}`
+      `[Telegram Webhook] Valid count: Students=${students}, Staff=${staff}, Others=${others}, Total=${total}`
     );
 
     // Extract sender username or display name
@@ -143,16 +143,16 @@ export async function POST(request: NextRequest) {
       : [from?.first_name, from?.last_name].filter(Boolean).join(' ') || `Chat_${chatId}`;
     const submittedBy = `Telegram: ${senderIdentifier}`;
 
-    // Store parsed data using existing database / data workflow (safe non-blocking)
-    const { isoDate } = getCurrentDateInTimezone();
+    // Automatic Date in configured timezone
+    const { isoDate, formattedDate } = getCurrentDateInTimezone();
     try {
       const existingRecord = await getDailyCountByDate(isoDate);
 
       if (existingRecord) {
         await updateDailyCount(isoDate, {
-          students: hostel,
-          staff: students,
-          others: rooms,
+          students,
+          staff,
+          others,
           total,
           submittedBy,
           messageId: updateKey,
@@ -161,9 +161,9 @@ export async function POST(request: NextRequest) {
       } else {
         await saveDailyCount({
           recordDate: isoDate,
-          students: hostel,
-          staff: students,
-          others: rooms,
+          students,
+          staff,
+          others,
           total,
           submittedBy,
           messageId: updateKey,
@@ -174,8 +174,8 @@ export async function POST(request: NextRequest) {
       console.error('[Telegram Webhook Database Error]', dbErr?.message || dbErr);
     }
 
-    // Requirement 4: Send success reply using Telegram Bot API
-    const successReply = formatTelegramSuccessReply(hostel, students, rooms);
+    // Send success reply using Telegram Bot API with automatic date
+    const successReply = formatTelegramSuccessReply(formattedDate, students, staff, others);
     const sendResult = await sendTelegramMessage(chatId, successReply);
     console.log(`[Telegram Webhook] Success reply sendResult:`, sendResult);
 
