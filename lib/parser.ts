@@ -1,6 +1,6 @@
 import { CommandType, ParseResult } from '@/types';
 
-export const INVALID_FORMAT_REPLY = `❌ Invalid format.
+export const INVALID_FORMAT_REPLY = `Invalid format.
 
 Please send the hostel count like:
 
